@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Caça Molestador</title>
+    <style>
+        body {
+            margin: 0;
+            background: #f7f7f7;
+            font-family: sans-serif;
+            overflow: hidden;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        canvas {
+            display: block;
+            background: #f7f7f7;
+            border-bottom: 2px solid #333;
+            touch-action: manipulation;
+            max-width: 100%;
+            height: auto;
+        }
+        #controls {
+            text-align: center;
+            margin-top: 10px;
+            display: none;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #gameOver {
+            text-align: center;
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border: 2px solid #333;
+            z-index: 10;
+        }
+        #gameOver .message {
+            font-size: 1.5em;
+            margin: 10px 0;
+        }
+        #gameOver .emojis {
+            font-size: 2em;
+            margin: 10px 0;
+        }
+        #title {
+            text-align: center;
+            margin-top: 20px;
+            color: #333;
+        }
+        #instructions {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+            margin-bottom: 20px;
+        }
+
+        #jumpButton {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 80px;
+            height: 80px;
+            background-color: #4CAF50; /* Verde */
+            border-radius: 50%; /* Faz o botão redondo */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent; /* Remove o destaque de toque no mobile */
+            z-index: 5;
+        }
+        #jumpButton:active { /* Feedback visual ao tocar */
+            background-color: #45a049;
+            transform: scale(0.98);
+        }
+
+        #shootButton {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 80px;
+            height: 80px;
+            background-color: #f44336; /* Vermelho */
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            z-index: 5;
+        }
+        #shootButton:active {
+            background-color: #d32f2f;
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+    <h1 id="title">🐵 Caça Molestador</h1>
+    <p id="instructions">Botão **PULAR** para Pular / Toque **ABAIXO** para Descer / Botão **TIRO** para Atirar</p>
+    <canvas id="game" width="800" height="300"></canvas>
+
+    <div id="gameOver">
+        <h2>Fim de Jogo!</h2>
+        <div class="message">Robinho foi molestado!</div>
+        <div class="emojis">𓀐𓂺 𓀐𓂸</div>
+        <button onclick="restart()">Recomeçar</button>
+    </div>
+
+    <div id="jumpButton">PULAR</div>
+    <div id="shootButton">-></div>
+
+    <audio id="jumpSound" src="https://cdn.pixabay.com/download/audio/2023/04/26/audio_1a5aa3dfe7.mp3?filename=blow-fart-113273.mp3"></audio>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        const jumpSound = document.getElementById('jumpSound');
+        const title = document.getElementById('title');
+        const instructions = document.getElementById('instructions');
+        const gameOverDiv = document.getElementById('gameOver');
+        const jumpButton = document.getElementById('jumpButton');
+        const shootButton = document.getElementById('shootButton');
+
+        let emoji = "🐵";
+        let score = 0;
+        let gameRunning = true;
+        let gameStarted = false;
+        let gameSpeed = 6;
+        const maxGameSpeed = 15;
+        const speedIncreaseRate = 0.0005;
+
+        const player = {
+            x: 50,
+            y: 220,
+            width: 40,
+            height: 40,
+            velocityY: 0,
+            gravity: 1.0,
+            jumpStrength: -18,
+            jumpCount: 0,
+            maxJumps: 2
+        };
+
+        const ground = {
+            x1: 0,
+            x2: canvas.width,
+            y: canvas.height - 40,
+            height: 40,
+            color: 'black'
+        };
+
+        // Mudamos de `currentObstacle` para um array `obstacles` para permitir múltiplos
+        let obstacles = [];
+        let obstacleGenerationTimer = 0;
+        // Intervalo base para geração de obstáculos. Ainda mais baixo para mais frequência.
+        const obstacleGenerationInterval = 70; // Era 80
+
+        // Distância mínima entre o final de um obstáculo e o início do próximo
+        const minObstacleDistance = 150; // Pixels de distância mínima
+
+        const nonTargetObstacles = [
+            { emoji: "🍆", type: 'low', width: 30, height: 40, base_y: 40 },
+            { emoji: "🥒", type: 'high', width: 30, height: 80, base_y: 80 },
+            { emoji: "🐦", type: 'flying', width: 40, height: 30, flying_y: [50, 150] }
+        ];
+
+        const targetObstacleSequence = [
+            { emoji: "ूाीू", type: 'ground_target', width: 40, height: 30, base_y: 30 },
+            { emoji: "🚓", type: 'ground_target', width: 40, height: 30, base_y: 30 }
+        ];
+        let nextTargetIndex = 0;
+
+        let projectiles = [];
+
+        /**
+         * Cria um novo obstáculo e o adiciona à lista.
+         */
+        function createObstacle() {
+            let obsData;
+            // Chance de 30% de gerar um obstáculo alvo, 70% de gerar um obstáculo normal
+            if (Math.random() < 0.3) {
+                obsData = targetObstacleSequence[nextTargetIndex];
+                nextTargetIndex = (nextTargetIndex + 1) % targetObstacleSequence.length;
+            } else {
+                obsData = nonTargetObstacles[(Math.random() * nonTargetObstacles.length) | 0];
+            }
+
+            let x = canvas.width;
+            let y;
+            let width = obsData.width;
+            let height = obsData.height;
+            let type = obsData.type;
+
+            if (obsData.type === 'flying') {
+                y = Math.random() * (obsData.flying_y[1] - obsData.flying_y[0]) + obsData.flying_y[0];
+            } else {
+                y = canvas.height - ground.height - obsData.base_y;
+            }
+
+            obstacles.push({
+                x: x,
+                y: y,
+                type: type,
+                width: width,
+                height: height,
+                emoji: obsData.emoji,
+                isTarget: (obsData.type === 'ground_target') // Adiciona propriedade para identificar alvos
+            });
+        }
+
+        function jump() {
+            if (!gameRunning && !gameStarted) {
+                gameStarted = true;
+                instructions.style.display = 'none';
+                gameLoop();
+                return;
+            }
+            if (gameRunning && player.jumpCount < player.maxJumps) {
+                player.velocityY = player.jumpStrength;
+                player.jumpCount++;
+                jumpSound.volume = 0.2;
+                jumpSound.currentTime = 0;
+                jumpSound.play();
+            }
+        }
+
+        function descend() {
+            if (!gameRunning) return;
+            player.velocityY += 5;
+        }
+
+        function shoot() {
+            if (!gameRunning) return;
+            projectiles.push({
+                x: player.x + player.width,
+                y: player.y + player.height / 2 - 10,
+                speedX: 15,
+                emoji: "->",
+                width: 20
+            });
+        }
+
+        function restart() {
+            score = 0;
+            gameSpeed = 6;
+            emoji = "🐵";
+            title.innerText = emoji + ' Caça Molestador';
+            player.y = 220;
+            player.velocityY = 0;
+            player.jumpCount = 0;
+            projectiles = [];
+            obstacles = []; // Agora limpamos o array de obstáculos
+            nextTargetIndex = 0;
+            gameRunning = true;
+            gameStarted = true;
+            gameOverDiv.style.display = 'none';
+            instructions.style.display = 'none';
+            gameLoop();
+        }
+
+        /**
+         * Atualiza o estado do jogo (movimento, colisões, pontuação).
+         */
+        function update() {
+            if (!gameRunning) return;
+
+            gameSpeed = Math.min(gameSpeed + speedIncreaseRate, maxGameSpeed);
+            score += 0.1 * (gameSpeed / 6);
+
+            player.velocityY += player.gravity;
+            player.y += player.velocityY;
+
+            if (player.y >= ground.y - player.height) {
+                player.y = ground.y - player.height;
+                player.velocityY = 0;
+                player.jumpCount = 0;
+            }
+
+            ground.x1 -= gameSpeed;
+            ground.x2 -= gameSpeed;
+            if (ground.x1 + canvas.width < 0) {
+                ground.x1 = canvas.width;
+            }
+            if (ground.x2 + canvas.width < 0) {
+                ground.x2 = canvas.width;
+            }
+
+            // Lógica de geração de múltiplos obstáculos
+            obstacleGenerationTimer++;
+            // Verifica se o último obstáculo está longe o suficiente OU se não há nenhum obstáculo
+            const lastObstacle = obstacles[obstacles.length - 1];
+            const canGenerate = !lastObstacle || (canvas.width - (lastObstacle.x + lastObstacle.width)) >= minObstacleDistance;
+
+            if (obstacleGenerationTimer >= obstacleGenerationInterval / (gameSpeed / 6) && canGenerate && Math.random() < 0.9) {
+                createObstacle();
+                obstacleGenerationTimer = 0;
+            }
+
+            // Movimento e detecção de colisão de todos os obstáculos
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                obs.x -= gameSpeed;
+
+                // Colisão do jogador com o obstáculo
+                if (
+                    player.x < obs.x + obs.width &&
+                    player.x + player.width > obs.x &&
+                    player.y < obs.y + obs.height &&
+                    player.y + player.height > obs.y
+                ) {
+                    gameRunning = false;
+                    gameOverDiv.style.display = 'block';
+                }
+
+                // Remove o obstáculo se ele sair da tela
+                if (obs.x + obs.width < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+
+            // Movimento dos projéteis e detecção de colisão com oponentes
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const projectile = projectiles[i];
+                projectile.x += projectile.speedX;
+
+                let hitObstacle = false;
+                for (let j = obstacles.length - 1; j >= 0; j--) {
+                    const obs = obstacles[j];
+                    // Verifica se o obstáculo é um alvo e se houve colisão
+                    if (obs.isTarget &&
+                        projectile.x < obs.x + obs.width &&
+                        projectile.x + projectile.width > obs.x &&
+                        projectile.y > obs.y - 10 &&
+                        projectile.y < obs.y + obs.height + 10
+                    ) {
+                        obstacles.splice(j, 1); // Remove o obstáculo atingido
+                        projectiles.splice(i, 1); // Remove o projétil
+                        score += 50; // Adiciona pontos por acertar
+                        hitObstacle = true;
+                        break; // Sai do loop interno, pois o projétil já atingiu algo
+                    }
+                }
+                // Se o projétil não atingiu nada e saiu da tela
+                if (!hitObstacle && projectile.x > canvas.width) {
+                    projectiles.splice(i, 1);
+                }
+            }
+
+            if (score >= 10 && emoji === "🐵") {
+                emoji = "🙉";
+                title.innerText = emoji + ' Caça Molestador';
+            }
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = "#f7f7f7";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = "#ccc";
+            ctx.beginPath();
+            ctx.arc(100 + ground.x1 * 0.1 % (canvas.width + 200), 50, 20, 0, Math.PI * 2);
+            ctx.arc(120 + ground.x1 * 0.1 % (canvas.width + 200), 40, 25, 0, Math.PI * 2);
+            ctx.arc(140 + ground.x1 * 0.1 % (canvas.width + 200), 50, 20, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(300 + ground.x1 * 0.1 % (canvas.width + 200), 80, 15, 0, Math.PI * 2);
+            ctx.arc(320 + ground.x1 * 0.1 % (canvas.width + 200), 70, 20, 0, Math.PI * 2);
+            ctx.arc(340 + ground.x1 * 0.1 % (canvas.width + 200), 80, 15, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(600 + ground.x1 * 0.1 % (canvas.width + 200), 60, 25, 0, Math.PI * 2);
+            ctx.arc(620 + ground.x1 * 0.1 % (canvas.width + 200), 50, 30, 0, Math.PI * 2);
+            ctx.arc(640 + ground.x1 * 0.1 % (canvas.width + 200), 60, 25, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = ground.color;
+            ctx.fillRect(ground.x1, ground.y, canvas.width, ground.height);
+            ctx.fillRect(ground.x2, ground.y, canvas.width, ground.height);
+        }
+
+        function drawPlayer() {
+            ctx.font = "30px Arial";
+            ctx.fillText(emoji, player.x, player.y + 30);
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(player.x + 10, player.y + 35);
+            ctx.lineTo(player.x, player.y + 35 + 15);
+            ctx.moveTo(player.x + 25, player.y + 35);
+            ctx.lineTo(player.x + 35, player.y + 35 + 15);
+            ctx.stroke();
+        }
+
+        /**
+         * Desenha todos os obstáculos ativos na tela.
+         */
+        function drawObstacles() {
+            obstacles.forEach(obs => {
+                ctx.font = obs.type === 'flying' ? "25px Arial" : "30px Arial";
+                ctx.fillText(obs.emoji, obs.x, obs.y + (obs.height / 2) + 10);
+            });
+        }
+
+        function drawProjectiles() {
+            ctx.font = "20px Arial";
+            projectiles.forEach(p => {
+                ctx.fillText(p.emoji, p.x, p.y + 15);
+            });
+        }
+
+        function drawScore() {
+            ctx.fillStyle = "black";
+            ctx.font = "24px Arial";
+            ctx.textAlign = "right";
+            ctx.fillText(`PONTOS: ${Math.floor(score)}`, canvas.width - 20, 30);
+            ctx.textAlign = "left";
+        }
+
+        function gameLoop() {
+            if (!gameRunning) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBackground();
+            update();
+            drawPlayer();
+            drawObstacles(); // Chamada para desenhar todos os obstáculos
+            drawProjectiles();
+            drawScore();
+            requestAnimationFrame(gameLoop);
+        }
+
+        document.removeEventListener("keydown", (e) => {});
+
+        jumpButton.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            jump();
+        });
+
+        shootButton.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            shoot();
+            if (!gameStarted) {
+                gameStarted = true;
+                instructions.style.display = 'none';
+                gameLoop();
+            }
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+
+            const touchY = e.touches[0].clientY;
+            const canvasRect = canvas.getBoundingClientRect();
+            const relativeTouchY = touchY - canvasRect.top;
+
+            if (relativeTouchY > canvas.height / 2 && gameRunning) {
+                descend();
+            }
+
+            if (!gameStarted) {
+                gameStarted = true;
+                instructions.style.display = 'none';
+                gameLoop();
+            }
+        });
+    </script>
+</body>
+</html>
